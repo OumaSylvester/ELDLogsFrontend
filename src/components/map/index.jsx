@@ -4,14 +4,17 @@ import { Button, Container, Form, InputGroup, Spinner, Offcanvas, Row, Col } fro
 import { FaLocationArrow, FaTimes, FaList } from "react-icons/fa";
 import { useJsApiLoader, GoogleMap, Marker, Autocomplete } from "@react-google-maps/api";
 import { decode } from "@googlemaps/polyline-codec";
-import { getManeuverIcon, getCoordinates } from "../../utils";
+import {getCoordinates, formatDuration } from "../../utils";
+import Tracker from "../speedometer";
+import Instructions from "../instructions";
 
 const Map = ({ viewELDLog, setViewELDLog }) => {
   const [viewELDLogBtnText, setViewELDLogBtnText] = useState('');
-  const [centerLocation, setCenterLocation] = useState({ lat: -1.286389, lng: 36.817223 });
+  const [destinationLocation, setDestinationLocation] = useState({ lat: -1.286389, lng: 36.817223 });
+  const [currentLocation, setCurrentLocation] = useState({ lat: -1.286389, lng: 36.817223 });
   const { isLoaded } = useJsApiLoader({
     googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY,
-    libraries: ['places'],
+    libraries: ['places', 'geometry'],
   });
 
   const [map, setMap] = useState(null);
@@ -21,6 +24,8 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
   const [routePath, setRoutePath] = useState(null);
   const [instructions, setInstructions] = useState([]);
   const [showInstructions, setShowInstructions] = useState(false);
+  const [formattedDuration, setFormattedDuration] = useState('');
+
 
   const originRef = useRef();
   const destinationRef = useRef();
@@ -40,8 +45,8 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
     }
 
     try {
-      const newCenter = await getCoordinates(destinationRef.current.value);
-      setCenterLocation(newCenter);
+      const destinationLoc = await getCoordinates(destinationRef.current.value);
+      setDestinationLocation(destinationLoc);
 
       const response = await fetch(
         `https://routes.googleapis.com/directions/v2:computeRoutes`,
@@ -75,6 +80,7 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
       setDirectionsResponse(data);
       setDistance(data.routes[0].distanceMeters + " meters");
       setDuration(data.routes[0].duration);
+      setFormattedDuration(formatDuration(data.routes[0].duration));
 
       const decodedPath = decode(data.routes[0].polyline.encodedPolyline);
       const pathCoordinates = decodedPath.map(([lat, lng]) => ({ lat, lng }));
@@ -103,6 +109,7 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
     setDirectionsResponse(null);
     setDistance('');
     setDuration('');
+    setFormattedDuration('');
     originRef.current.value = '';
     destinationRef.current.value = '';
     if (routePath) {
@@ -119,7 +126,11 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          setCenterLocation({
+          setCurrentLocation({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+          setDestinationLocation({
             lat: position.coords.latitude,
             lng: position.coords.longitude,
           });
@@ -166,44 +177,53 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
         backgroundPosition: "bottom",
       }}
     >
-      <Container className="p-4 rounded shadow bg-white mt-4" style={{ zIndex: 10 }}>
+      <Container className="p-4 rounded shadow bg-white mt-md-4" style={{ zIndex: 10 }}>
         {/* Responsive Form and Buttons */}
         <Row className="mb-3">
-          <Col xs={12} md={5} className="mb-2">
+          <Col xs={12} md={3} className="mb-2">
             <Autocomplete>
               <Form.Control type="text" placeholder="Origin" ref={originRef} />
             </Autocomplete>
           </Col>
-          <Col xs={12} md={5} className="mb-2">
+          <Col xs={12} md={3} className="mb-2">
             <Autocomplete>
               <Form.Control type="text" placeholder="Destination" ref={destinationRef} />
             </Autocomplete>
           </Col>
-          <Col xs={12} md={2} className="d-flex flex-column">
-            <Button variant="danger" className="mb-2" onClick={calculateRoute}>
+          <Col xs={12} md={5} className="d-flex flex-colum">
+            <Button variant="danger" className="mb-2 me-2" onClick={calculateRoute}>
               Calculate Route
             </Button>
-            <Button variant="secondary" className="mb-2" onClick={clearRoute}>
+            <Button variant="secondary" className="mb-2 me-2" onClick={clearRoute}>
               <FaTimes />
             </Button>
             <Button className="mb-2" onClick={() => setViewELDLog(!viewELDLog)}>
               {viewELDLogBtnText}
             </Button>
           </Col>
+          <Col xs={12} md={1} className="d-flex justify-content-start">
+            <Button variant="primary" onClick={() => recenterMap(currentLocation)}>
+              <FaLocationArrow />
+            </Button>
+          </Col>
         </Row>
-
-        <div className="d-flex justify-content-between align-items-center mb-3">
-          <p className="m-0">Distance: {distance}</p>
-          <p className="m-0">Duration: {duration}</p>
-          <Button variant="primary" className="rounded-circle" onClick={() => recenterMap(centerLocation)}>
-            <FaLocationArrow />
+        <div className="d-flex flex-column  flex-md-row justify-content-around align-items-center  mb-2">
+          <div className="speedometer mb-3">
+            <Tracker isLoaded={isLoaded} setCurrentLocation={setCurrentLocation}  google={google}/>
+          </div>
+          <Button variant="info" className="mb-3" onClick={() => setShowInstructions(true)}>
+            <FaList /> 
+            <span  className="d-inline-block ps-2 mt-1">View Instructions</span>
           </Button>
         </div>
+        {/* <div className="d-flex justify-content-between align-items-center mb-3"> */}
+          {/* <p className="m-0">Total Distance(from start location): {distance}</p>
+          <p className="m-0">Duration: {formattedDuration}</p> */}
+         
+        {/* </div> */}
 
         {/* Button to toggle instructions offcanvas */}
-        <Button variant="info" className="mb-3" onClick={() => setShowInstructions(true)}>
-          <FaList /> View Instructions
-        </Button>
+        
 
         {/* Offcanvas for instructions */}
         <Offcanvas show={showInstructions} onHide={() => setShowInstructions(false)} placement="end">
@@ -211,32 +231,13 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
             <Offcanvas.Title>Route Instructions</Offcanvas.Title>
           </Offcanvas.Header>
           <Offcanvas.Body>
-            {instructions.length > 0 ? (
-              <ol className="list-group">
-                {instructions.map((step, index) => (
-                  <li key={index} className="list-group-item d-flex align-items-center">
-                    <span className="me-2">
-                      {getManeuverIcon(step.navigationInstruction?.maneuver)}
-                    </span>
-                    <div>
-                      <strong>Step {index + 1}:</strong> {step.navigationInstruction?.instructions}
-                      <br />
-                      <small className="text-muted">
-                        Distance: {step.distanceMeters} meters | Duration: {step.staticDuration}
-                      </small>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p>No route instructions available.</p>
-            )}
+            <Instructions instructions={instructions} />
           </Offcanvas.Body>
         </Offcanvas>
 
         <div className="google-map">
           <GoogleMap
-            center={centerLocation}
+            center={currentLocation}
             zoom={15}
             mapContainerStyle={{ width: '100%', height: '800px' }}
             options={{
@@ -247,7 +248,17 @@ const Map = ({ viewELDLog, setViewELDLog }) => {
             }}
             onLoad={onMapLoad}
           >
-            <Marker position={centerLocation} />
+             {currentLocation &&<Marker 
+                position={currentLocation}
+                icon={{
+                  url: `${window.location.origin}/icon-send.svg`,
+                  scaledSize: new google.maps.Size(40, 40),
+                  anchor: new google.maps.Point(15, 15),
+                  rotation: currentLocation.heading
+                }}       
+              />
+              }
+            {destinationLocation && <Marker position={destinationLocation} /> }
           </GoogleMap>
         </div>
       </Container>
